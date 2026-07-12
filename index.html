@@ -1,0 +1,475 @@
+<!DOCTYPE html>
+<html lang="bn">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1.0" />
+<title>চাকরির বাজার — বাংলাদেশের চাকরির নোটিশবোর্ড</title>
+<script src="https://cdn.tailwindcss.com"></script>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/@supabase/supabase-js@2"></script>
+<style>
+  @import url('https://fonts.googleapis.com/css2?family=Tiro+Bangla&family=Noto+Sans+Bengali:wght@400;600;700&family=JetBrains+Mono:wght@500&display=swap');
+  * { box-sizing: border-box; }
+  body { margin: 0; }
+  .job-card { transition: transform .18s ease, box-shadow .18s ease; }
+  .job-card:hover { transform: rotate(0deg) translateY(-3px) !important; box-shadow: 0 10px 24px rgba(0,0,0,0.18); }
+  .board-bg { background-image: radial-gradient(#2B241B0d 1px, transparent 1px); background-size: 14px 14px; }
+  ::placeholder { color: #2B241B66; }
+  .modal-scroll::-webkit-scrollbar { width: 6px; }
+  .modal-scroll::-webkit-scrollbar-thumb { background: #2B241B33; border-radius: 3px; }
+  .tab-scroll::-webkit-scrollbar { display: none; }
+</style>
+</head>
+<body>
+<div id="root"></div>
+
+<script type="text/babel">
+const { useState, useEffect, useCallback, useRef } = React;
+
+// ====== CONFIG: your Supabase project ======
+const SUPABASE_URL = "https://vljndttfbsxfskknaqhf.supabase.co";
+const SUPABASE_ANON_KEY = "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6InZsam5kdHRmYnN4ZnNra25hcWhmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3ODM4NjM1OTQsImV4cCI6MjA5OTQzOTU5NH0.O7b6hijQn7-y95q_BeyjbsHEAXG3Lf-MajCmL2Y8GVU";
+const supabase = window.supabase.createClient(SUPABASE_URL, SUPABASE_ANON_KEY);
+
+// ---------- helpers ----------
+const bnDigits = ["০","১","২","৩","৪","৫","৬","৭","৮","৯"];
+const toBn = (n) => String(n).replace(/[0-9]/g, (d) => bnDigits[d]);
+
+const CATEGORIES = ["আইটি ও সফটওয়্যার","মার্কেটিং ও সেলস","শিক্ষকতা","ব্যাংক ও ফাইন্যান্স","গার্মেন্টস ও উৎপাদন","স্বাস্থ্যসেবা","অন্যান্য"];
+const LOCATIONS = ["ঢাকা","চট্টগ্রাম","সিলেট","রাজশাহী","খুলনা","বরিশাল","রংপুর","ময়মনসিংহ","রিমোট/অনলাইন","অন্যান্য"];
+const SECTORS = ["সরকারি","বেসরকারি","ভর্তি পরীক্ষা / ফলাফল"];
+
+const MENU_TABS = [
+  { id: "সব", label: "সব বিজ্ঞপ্তি", icon: "📋" },
+  { id: "নতুন", label: "নতুন চাকরি", icon: "🆕" },
+  { id: "সরকারি", label: "সরকারি চাকরি", icon: "🏛️" },
+  { id: "বেসরকারি", label: "বেসরকারি চাকরি", icon: "🏢" },
+  { id: "ভর্তি", label: "ভর্তি পরীক্ষা", icon: "🎓" },
+  { id: "ডেট", label: "চাকরির ডেট", icon: "📅" },
+  { id: "পুরাতন", label: "পুরাতন চাকরি", icon: "🗄️" },
+];
+
+const ROTATIONS = [-2.2, 1.4, -1, 2, 0.6, -1.8, 1.1];
+
+function genId() { return Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+function genRefCode() {
+  const n = Math.floor(1000 + Math.random() * 9000);
+  return `স্মারক নং: JB-${toBn(n)}/২০২৬`;
+}
+function genAppRefCode() { return "APP-" + toBn(Math.floor(1000 + Math.random() * 9000)); }
+function genAdminCode() {
+  const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
+  let out = "";
+  for (let i = 0; i < 6; i++) out += chars[Math.floor(Math.random() * chars.length)];
+  return out;
+}
+function formatDateBn(iso) {
+  if (!iso) return "";
+  const d = new Date(iso);
+  if (isNaN(d)) return iso;
+  const months = ["জানু","ফেব্রু","মার্চ","এপ্রিল","মে","জুন","জুলাই","আগস্ট","সেপ্ট","অক্টো","নভে","ডিসে"];
+  return `${toBn(d.getDate())} ${months[d.getMonth()]}, ${toBn(d.getFullYear())}`;
+}
+function isExpired(deadline) {
+  if (!deadline) return false;
+  return new Date(deadline + "T23:59:59").getTime() < Date.now();
+}
+function daysLeft(deadline) {
+  if (!deadline) return null;
+  const diff = Math.ceil((new Date(deadline + "T23:59:59") - Date.now()) / 86400000);
+  return diff;
+}
+
+const paper = "#EFE7D2", ink = "#2B241B", green = "#0B4A38", greenDark = "#08362A", red = "#A93226", mustard = "#C99A2E";
+const fontDisplay = { fontFamily: "'Tiro Bangla','Noto Serif Bengali',serif" };
+const fontBody = { fontFamily: "'Noto Sans Bengali','Hind Siliguri',sans-serif" };
+const fontMono = { fontFamily: "'JetBrains Mono','Courier New',monospace" };
+const inputStyle = { ...fontBody, width: "100%", padding: "10px 12px", borderRadius: 6, border: `1.5px solid ${ink}33`, background: "#FBF8EF", color: ink, outline: "none" };
+
+function Field({ label, children, required }) {
+  return (
+    <label className="block mb-4">
+      <span className="block text-sm mb-1.5" style={{ ...fontBody, color: ink, opacity: 0.85 }}>
+        {label}{required && <span style={{ color: red }}> *</span>}
+      </span>
+      {children}
+    </label>
+  );
+}
+
+// ---------- Supabase data layer ----------
+async function loadJobs() {
+  const { data, error } = await supabase.from("jobs").select("*").order("posted_at", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+async function insertJob(job) {
+  const { error } = await supabase.from("jobs").insert([job]);
+  if (error) throw error;
+}
+async function loadApplications(jobId) {
+  const { data, error } = await supabase.from("applications").select("*").eq("job_id", jobId).order("applied_at", { ascending: false });
+  if (error) { console.error(error); return []; }
+  return data || [];
+}
+async function insertApplication(app) {
+  const { error } = await supabase.from("applications").insert([app]);
+  if (error) throw error;
+}
+
+function App() {
+  const [jobs, setJobs] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState(false);
+  const [query, setQuery] = useState("");
+  const [catFilter, setCatFilter] = useState("সব");
+  const [locFilter, setLocFilter] = useState("সব");
+  const [activeTab, setActiveTab] = useState("সব");
+  const [modal, setModal] = useState(null);
+  const [selectedJob, setSelectedJob] = useState(null);
+  const [lastAdminCode, setLastAdminCode] = useState("");
+  const [lastRefCode, setLastRefCode] = useState("");
+  const [applicantsData, setApplicantsData] = useState([]);
+  const [gateError, setGateError] = useState("");
+  const [posting, setPosting] = useState(false);
+  const [applying, setApplying] = useState(false);
+  const jobSelectRef = useRef(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    setLoadError(false);
+    try {
+      const j = await loadJobs();
+      setJobs(j);
+    } catch (e) {
+      setLoadError(true);
+    }
+    setLoading(false);
+  }, []);
+
+  useEffect(() => { refresh(); }, [refresh]);
+
+  const sevenDaysAgo = Date.now() - 7 * 86400000;
+
+  let visible = jobs.filter((j) => {
+    const q = query.trim().toLowerCase();
+    const matchQ = !q || j.title.toLowerCase().includes(q) || j.company.toLowerCase().includes(q);
+    const matchCat = catFilter === "সব" || j.category === catFilter;
+    const matchLoc = locFilter === "সব" || j.location === locFilter;
+    return matchQ && matchCat && matchLoc;
+  });
+
+  if (activeTab === "সরকারি") visible = visible.filter((j) => j.sector === "সরকারি" && !isExpired(j.deadline));
+  else if (activeTab === "বেসরকারি") visible = visible.filter((j) => j.sector === "বেসরকারি" && !isExpired(j.deadline));
+  else if (activeTab === "ভর্তি") visible = visible.filter((j) => j.sector === "ভর্তি পরীক্ষা / ফলাফল" && !isExpired(j.deadline));
+  else if (activeTab === "নতুন") visible = visible.filter((j) => j.posted_at >= sevenDaysAgo && !isExpired(j.deadline));
+  else if (activeTab === "পুরাতন") visible = visible.filter((j) => isExpired(j.deadline));
+  else if (activeTab === "ডেট") visible = visible.filter((j) => !isExpired(j.deadline)).sort((a, b) => new Date(a.deadline) - new Date(b.deadline));
+  else visible = [...visible].sort((a, b) => {
+    const ae = isExpired(a.deadline), be = isExpired(b.deadline);
+    if (ae !== be) return ae ? 1 : -1;
+    return b.posted_at - a.posted_at;
+  });
+
+  function closeModal() { setModal(null); setSelectedJob(null); setGateError(""); }
+
+  async function handlePostJob(e) {
+    e.preventDefault();
+    setPosting(true);
+    const f = e.target;
+    const adminCode = genAdminCode();
+    const refCode = genRefCode();
+    const newJob = {
+      id: genId(),
+      title: f.title.value.trim(),
+      company: f.company.value.trim(),
+      location: f.location.value,
+      category: f.category.value,
+      sector: f.sector.value,
+      salary: f.salary.value.trim(),
+      deadline: f.deadline.value,
+      description: f.description.value.trim(),
+      requirements: f.requirements.value.trim(),
+      contact_email: f.contactEmail.value.trim(),
+      admin_code: adminCode,
+      ref_code: refCode,
+      posted_at: Date.now(),
+    };
+    try {
+      await insertJob(newJob);
+      await refresh();
+      setLastAdminCode(adminCode);
+      setLastRefCode(refCode);
+      setModal("postSuccess");
+    } catch (err) {
+      alert("পোস্ট করতে সমস্যা হয়েছে। আবার চেষ্টা করো।");
+      console.error(err);
+    }
+    setPosting(false);
+  }
+
+  async function handleApply(e) {
+    e.preventDefault();
+    setApplying(true);
+    const f = e.target;
+    const refCode = genAppRefCode();
+    const newApp = {
+      id: genId(),
+      job_id: selectedJob.id,
+      name: f.name.value.trim(),
+      phone: f.phone.value.trim(),
+      email: f.email.value.trim(),
+      cover_note: f.coverNote.value.trim(),
+      applied_at: Date.now(),
+      ref_code: refCode,
+    };
+    try {
+      await insertApplication(newApp);
+      setLastRefCode(refCode);
+      setModal("applySuccess");
+    } catch (err) {
+      alert("আবেদন পাঠাতে সমস্যা হয়েছে। আবার চেষ্টা করো।");
+      console.error(err);
+    }
+    setApplying(false);
+  }
+
+  async function handleViewGate(e) {
+    e.preventDefault();
+    setGateError("");
+    const f = e.target;
+    const code = f.code.value.trim();
+    const jobId = jobSelectRef.current.value;
+    const found = jobs.find((j) => j.id === jobId);
+    if (!found) { setGateError("চাকরিটি খুঁজে পাওয়া যায়নি।"); return; }
+    if (found.admin_code !== code) { setGateError("কোডটি সঠিক নয়। আবার চেষ্টা করুন।"); return; }
+    const apps = await loadApplications(found.id);
+    setSelectedJob(found);
+    setApplicantsData(apps);
+    setModal("applicants");
+  }
+
+  return (
+    <div style={{ ...fontBody, background: paper, minHeight: "100vh", color: ink }}>
+      <style>{`
+        .btn-primary { background: ${green}; color: #fff; }
+        .btn-primary:hover { background: ${greenDark}; }
+        .btn-outline { border: 1.5px solid ${green}; color: ${green}; background: transparent; }
+        .btn-outline:hover { background: ${green}; color: #fff; }
+      `}</style>
+
+      <header style={{ background: green }} className="px-5 py-5 sm:px-8 sm:py-6">
+        <div className="max-w-5xl mx-auto flex items-center justify-between gap-4 flex-wrap">
+          <div>
+            <h1 style={{ ...fontDisplay, color: "#fff" }} className="text-2xl sm:text-3xl font-bold tracking-tight">চাকরির বাজার</h1>
+            <p style={{ color: mustard }} className="text-sm mt-0.5">বাংলাদেশের চাকরির নোটিশবোর্ড</p>
+          </div>
+          <div className="flex gap-2 flex-wrap">
+            <button onClick={() => setModal("viewGate")} className="btn-outline px-4 py-2 rounded-md text-sm font-semibold" style={{ borderColor: mustard, color: mustard }}>আবেদনকারী দেখুন</button>
+            <button onClick={() => setModal("post")} className="px-4 py-2 rounded-md text-sm font-semibold" style={{ background: mustard, color: greenDark }}>+ চাকরি পোস্ট করুন</button>
+          </div>
+        </div>
+      </header>
+
+      <nav className="tab-scroll max-w-5xl mx-auto px-5 sm:px-8 flex gap-2 overflow-x-auto py-3" style={{ background: "#FBF8EF", borderBottom: `1px solid ${ink}1a` }}>
+        {MENU_TABS.map((t) => (
+          <button
+            key={t.id}
+            onClick={() => setActiveTab(t.id)}
+            className="shrink-0 px-3.5 py-1.5 rounded-full text-sm font-semibold flex items-center gap-1.5"
+            style={activeTab === t.id ? { background: green, color: "#fff" } : { background: `${ink}0d`, color: ink }}
+          >
+            <span>{t.icon}</span>{t.label}
+          </button>
+        ))}
+      </nav>
+
+      <div className="max-w-5xl mx-auto px-5 sm:px-8 pt-5 pb-2">
+        <div className="flex flex-col sm:flex-row gap-3">
+          <input style={inputStyle} placeholder="পদ বা প্রতিষ্ঠানের নাম দিয়ে খুঁজুন..." value={query} onChange={(e) => setQuery(e.target.value)} className="sm:flex-1" />
+          <select style={inputStyle} value={catFilter} onChange={(e) => setCatFilter(e.target.value)} className="sm:w-56">
+            <option>সব</option>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}
+          </select>
+          <select style={inputStyle} value={locFilter} onChange={(e) => setLocFilter(e.target.value)} className="sm:w-48">
+            <option>সব</option>{LOCATIONS.map((l) => <option key={l}>{l}</option>)}
+          </select>
+        </div>
+      </div>
+
+      <main className="board-bg max-w-5xl mx-auto px-5 sm:px-8 py-8 min-h-[50vh]">
+        {loading ? (
+          <p className="text-center py-16 opacity-60">লোড হচ্ছে...</p>
+        ) : loadError ? (
+          <p className="text-center py-16" style={{ color: red }}>ডেটাবেস থেকে লোড করতে সমস্যা হচ্ছে। কিছুক্ষণ পর আবার চেষ্টা করো।</p>
+        ) : visible.length === 0 ? (
+          <div className="text-center py-16">
+            <p style={fontDisplay} className="text-xl mb-2">এই তালিকায় কিছু পাওয়া যায়নি</p>
+            <p className="opacity-70 text-sm mb-5">অন্য ট্যাব দেখো, অথবা প্রথম পোস্টটি নিজেই করো।</p>
+            <button onClick={() => setModal("post")} className="btn-primary px-5 py-2.5 rounded-md text-sm font-semibold">+ চাকরি পোস্ট করুন</button>
+          </div>
+        ) : (
+          <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-7 pt-2">
+            {visible.map((job, i) => {
+              const expired = isExpired(job.deadline);
+              const dLeft = daysLeft(job.deadline);
+              return (
+                <div key={job.id} className="job-card relative rounded-sm p-5 pt-7 cursor-pointer"
+                  style={{ background: "#FBF8EF", transform: `rotate(${ROTATIONS[i % ROTATIONS.length]}deg)`, boxShadow: "0 4px 10px rgba(0,0,0,0.12)", border: `1px dashed ${ink}22`, opacity: expired ? 0.55 : 1 }}
+                  onClick={() => { setSelectedJob(job); setModal("detail"); }}>
+                  <span className="absolute rounded-full" style={{ top: -8, left: "50%", marginLeft: -7, width: 14, height: 14, background: `radial-gradient(circle at 35% 30%, #fff5, ${i % 2 ? red : mustard})`, boxShadow: "0 2px 3px rgba(0,0,0,0.35)" }} />
+                  {expired ? (
+                    <span className="absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded" style={{ background: `${ink}22`, color: ink }}>মেয়াদ শেষ</span>
+                  ) : dLeft !== null && dLeft <= 3 ? (
+                    <span className="absolute top-2 right-2 text-[10px] px-2 py-0.5 rounded font-semibold" style={{ background: `${red}22`, color: red }}>{dLeft <= 0 ? "আজই শেষ দিন" : `আর ${toBn(dLeft)} দিন বাকি`}</span>
+                  ) : null}
+                  <p style={{ ...fontMono, color: red }} className="text-[11px] mb-1.5">{job.ref_code}</p>
+                  <h3 style={fontDisplay} className="text-lg font-bold leading-snug mb-1">{job.title}</h3>
+                  <p className="text-sm opacity-80 mb-3">{job.company} · {job.location}</p>
+                  <div className="flex flex-wrap gap-1.5 mb-3">
+                    <span className="text-xs px-2 py-0.5 rounded" style={{ background: `${green}1a`, color: green }}>{job.sector}</span>
+                    {job.category && <span className="text-xs px-2 py-0.5 rounded" style={{ background: `${mustard}22`, color: greenDark }}>{job.category}</span>}
+                  </div>
+                  {job.salary && <p className="text-sm font-semibold mb-1" style={{ color: greenDark }}>{job.salary}</p>}
+                  <p style={fontMono} className="text-xs opacity-60">শেষ তারিখ: {formatDateBn(job.deadline)}</p>
+                </div>
+              );
+            })}
+          </div>
+        )}
+      </main>
+
+      {modal && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center p-4" style={{ background: "#00000066" }} onClick={closeModal}>
+          <div onClick={(e) => e.stopPropagation()} className="modal-scroll relative w-full max-w-lg max-h-[88vh] overflow-y-auto rounded-lg p-6 sm:p-7" style={{ background: paper, boxShadow: "0 20px 50px rgba(0,0,0,0.35)" }}>
+            <button onClick={closeModal} className="absolute top-4 right-4 text-xl opacity-60 hover:opacity-100" aria-label="বন্ধ করুন">✕</button>
+
+            {modal === "detail" && selectedJob && (
+              <div>
+                <p style={{ ...fontMono, color: red }} className="text-xs mb-2">{selectedJob.ref_code}</p>
+                <h2 style={fontDisplay} className="text-2xl font-bold mb-1 pr-6">{selectedJob.title}</h2>
+                <p className="text-sm opacity-80 mb-4">{selectedJob.company} · {selectedJob.location}</p>
+                {selectedJob.salary && <p className="font-semibold mb-3" style={{ color: greenDark }}>বেতন: {selectedJob.salary}</p>}
+                <p className="text-xs opacity-60 mb-4" style={fontMono}>আবেদনের শেষ তারিখ: {formatDateBn(selectedJob.deadline)}</p>
+                <h4 className="font-semibold mb-1 text-sm">চাকরির বিবরণ</h4>
+                <p className="text-sm mb-4 whitespace-pre-wrap opacity-90">{selectedJob.description || "—"}</p>
+                <h4 className="font-semibold mb-1 text-sm">যোগ্যতা</h4>
+                <p className="text-sm mb-5 whitespace-pre-wrap opacity-90">{selectedJob.requirements || "—"}</p>
+                {isExpired(selectedJob.deadline) ? (
+                  <p className="text-sm py-3 text-center rounded" style={{ background: `${ink}11` }}>আবেদনের মেয়াদ শেষ হয়ে গেছে</p>
+                ) : (
+                  <button onClick={() => setModal("apply")} className="btn-primary w-full py-2.5 rounded-md font-semibold">এই চাকরির জন্য আবেদন করুন</button>
+                )}
+              </div>
+            )}
+
+            {modal === "apply" && selectedJob && (
+              <form onSubmit={handleApply}>
+                <h2 style={fontDisplay} className="text-xl font-bold mb-1 pr-6">আবেদন করুন</h2>
+                <p className="text-sm opacity-70 mb-5">{selectedJob.title} · {selectedJob.company}</p>
+                <Field label="পূর্ণ নাম" required><input required name="name" style={inputStyle} placeholder="আপনার নাম" /></Field>
+                <Field label="মোবাইল নম্বর" required><input required name="phone" style={inputStyle} placeholder="01XXXXXXXXX" /></Field>
+                <Field label="ইমেইল"><input name="email" type="email" style={inputStyle} placeholder="you@example.com" /></Field>
+                <Field label="কেন আপনি এই কাজের জন্য উপযুক্ত?"><textarea name="coverNote" rows="4" style={inputStyle} placeholder="সংক্ষেপে লিখুন..."></textarea></Field>
+                <button disabled={applying} className="btn-primary w-full py-2.5 rounded-md font-semibold mt-1 disabled:opacity-60">{applying ? "পাঠানো হচ্ছে..." : "আবেদন জমা দিন"}</button>
+              </form>
+            )}
+
+            {modal === "applySuccess" && (
+              <div className="text-center py-4">
+                <p className="text-4xl mb-3">✅</p>
+                <h2 style={fontDisplay} className="text-xl font-bold mb-2">আবেদন সফল হয়েছে!</h2>
+                <p className="text-sm opacity-80 mb-4">প্রতিষ্ঠান আপনার সাথে যোগাযোগ করবে। আপনার আবেদন নম্বর:</p>
+                <p className="font-bold text-lg mb-6" style={{ ...fontMono, color: red }}>{lastRefCode}</p>
+                <button onClick={closeModal} className="btn-outline px-5 py-2 rounded-md font-semibold">ঠিক আছে</button>
+              </div>
+            )}
+
+            {modal === "post" && (
+              <form onSubmit={handlePostJob}>
+                <h2 style={fontDisplay} className="text-xl font-bold mb-5 pr-6">নতুন চাকরি পোস্ট করুন</h2>
+                <Field label="পদের নাম" required><input required name="title" style={inputStyle} placeholder="যেমন: সফটওয়্যার ইঞ্জিনিয়ার" /></Field>
+                <Field label="প্রতিষ্ঠানের নাম" required><input required name="company" style={inputStyle} placeholder="আপনার প্রতিষ্ঠান" /></Field>
+                <Field label="ধরন" required>
+                  <select required name="sector" style={inputStyle}>{SECTORS.map((s) => <option key={s}>{s}</option>)}</select>
+                </Field>
+                <div className="grid grid-cols-2 gap-3">
+                  <Field label="অবস্থান" required><select required name="location" style={inputStyle}>{LOCATIONS.map((l) => <option key={l}>{l}</option>)}</select></Field>
+                  <Field label="ক্যাটাগরি"><select name="category" style={inputStyle}>{CATEGORIES.map((c) => <option key={c}>{c}</option>)}</select></Field>
+                </div>
+                <Field label="বেতন (ঐচ্ছিক)"><input name="salary" style={inputStyle} placeholder="যেমন: ৳৩০,০০০ - ৪৫,০০০" /></Field>
+                <Field label="আবেদনের শেষ তারিখ" required><input required name="deadline" type="date" style={inputStyle} /></Field>
+                <Field label="চাকরির বিবরণ"><textarea name="description" rows="3" style={inputStyle} placeholder="দায়িত্ব ও কাজের বর্ণনা"></textarea></Field>
+                <Field label="যোগ্যতা"><textarea name="requirements" rows="3" style={inputStyle} placeholder="শিক্ষাগত যোগ্যতা, অভিজ্ঞতা ইত্যাদি"></textarea></Field>
+                <Field label="যোগাযোগের ইমেইল" required><input required name="contactEmail" type="email" style={inputStyle} placeholder="hr@company.com" /></Field>
+                <button disabled={posting} className="btn-primary w-full py-2.5 rounded-md font-semibold mt-2 disabled:opacity-60">{posting ? "পোস্ট হচ্ছে..." : "পোস্ট করুন"}</button>
+              </form>
+            )}
+
+            {modal === "postSuccess" && (
+              <div className="text-center py-2">
+                <p className="text-4xl mb-3">📌</p>
+                <h2 style={fontDisplay} className="text-xl font-bold mb-2">পোস্ট সম্পন্ন হয়েছে!</h2>
+                <p className="text-sm opacity-80 mb-1">চাকরির নোটিশবোর্ডে যুক্ত হয়েছে</p>
+                <p style={fontMono} className="text-sm mb-4">{lastRefCode}</p>
+                <div className="rounded-md p-4 mb-5 text-left" style={{ background: `${red}12`, border: `1px solid ${red}44` }}>
+                  <p className="text-sm font-semibold mb-1" style={{ color: red }}>এই কোডটি সংরক্ষণ করুন</p>
+                  <p className="text-sm opacity-80 mb-2">আবেদনকারীদের তালিকা দেখতে এই কোড লাগবে — এটি আর দেখানো হবে না।</p>
+                  <p style={{ ...fontMono, letterSpacing: 2 }} className="text-2xl font-bold text-center">{lastAdminCode}</p>
+                </div>
+                <button onClick={closeModal} className="btn-primary px-5 py-2 rounded-md font-semibold">ঠিক আছে</button>
+              </div>
+            )}
+
+            {modal === "viewGate" && (
+              <form onSubmit={handleViewGate}>
+                <h2 style={fontDisplay} className="text-xl font-bold mb-5 pr-6">আবেদনকারী দেখুন</h2>
+                <Field label="আপনার পোস্ট করা চাকরি নির্বাচন করুন" required>
+                  <select required ref={jobSelectRef} name="jobRef" style={inputStyle}>
+                    <option value="">-- নির্বাচন করুন --</option>
+                    {jobs.map((j) => <option key={j.id} value={j.id}>{j.title} · {j.company}</option>)}
+                  </select>
+                </Field>
+                <Field label="সংরক্ষণ কোড" required><input required name="code" style={inputStyle} placeholder="৬ ডিজিটের কোড" /></Field>
+                {gateError && <p className="text-sm mb-3" style={{ color: red }}>{gateError}</p>}
+                <button className="btn-primary w-full py-2.5 rounded-md font-semibold">দেখুন</button>
+              </form>
+            )}
+
+            {modal === "applicants" && selectedJob && (
+              <div>
+                <h2 style={fontDisplay} className="text-xl font-bold mb-1 pr-6">আবেদনকারীদের তালিকা</h2>
+                <p className="text-sm opacity-70 mb-5">{selectedJob.title} · মোট {toBn(applicantsData.length)} জন আবেদন করেছেন</p>
+                {applicantsData.length === 0 ? (
+                  <p className="text-sm opacity-70 py-6 text-center">এখনো কেউ আবেদন করেননি।</p>
+                ) : (
+                  <div className="space-y-3">
+                    {applicantsData.map((a) => (
+                      <div key={a.id} className="rounded-md p-3" style={{ background: "#FBF8EF", border: `1px solid ${ink}1a` }}>
+                        <div className="flex justify-between items-start mb-1">
+                          <p className="font-semibold">{a.name}</p>
+                          <p style={fontMono} className="text-[11px] opacity-60">{a.ref_code}</p>
+                        </div>
+                        <p className="text-sm opacity-80">{a.phone}{a.email ? ` · ${a.email}` : ""}</p>
+                        {a.cover_note && <p className="text-sm mt-2 opacity-90 whitespace-pre-wrap">{a.cover_note}</p>}
+                        <p style={fontMono} className="text-[11px] opacity-50 mt-2">{formatDateBn(new Date(a.applied_at).toISOString().slice(0,10))}</p>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
+      <footer className="text-center text-xs opacity-50 py-6">চাকরির বাজার — একটি স্বাধীন চাকরির নোটিশবোর্ড</footer>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById("root")).render(<App />);
+</script>
+</body>
+</html>
